@@ -50,7 +50,7 @@ def parse_msg(msg: np.array, io_group=0) -> np.array:
 
             wordtype = header[0]
 
-            if wordtype == ord("D"):  # or TX?
+            if wordtype == 0x44:  # 'D'
                 packet_type = 0  # data
                 io_channel = header[1]
                 receipt_timestamp = (
@@ -76,7 +76,7 @@ def parse_msg(msg: np.array, io_group=0) -> np.array:
                 register_address = (data[1] >> 2) | (data[2] << 6)
                 register_data = (data[2] >> 2) | (data[3] << 6)
 
-            elif wordtype == ord("S"):
+            elif wordtype == 0x53:  # 'S'
                 packet_type = 6  # sync
                 trigger_type = sync_type = header[1]
                 dataword = clk_source = header[2] & 0x01
@@ -84,7 +84,7 @@ def parse_msg(msg: np.array, io_group=0) -> np.array:
                     header[4] | (header[5] << 8) | (header[6] << 16) | (header[7] << 24)
                 )
 
-            elif wordtype == ord("T"):
+            elif wordtype == 0x54:  # 'T'
                 packet_type = 7  # trigger
                 trigger_type = header[1]
                 timestamp = (
