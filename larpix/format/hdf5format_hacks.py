@@ -1,15 +1,15 @@
+import time
+
 import h5py
 import numpy as np
 
-from .hdf5format import dtypes
+from .hdf5format import dtypes, _format_method_lookup
 
-DTYPE = dtypes["2.4"]["packets"]
-
-TEST_MSG1 = b"D\xdbA\x8bc\x00\x02\x00D\x1c\x9a\xa6@\x00\x00\x00,1\xbeK\x19\x80<LD\x1c&\xa7@\x00\x00\x00,1JL\x19\x80;\xcc"
-TEST_MSG2 = b"D\xdbA\x8bc\x00\x01\x00D\x07\x8b\xa9@\x00\x00\x00\xf8\xcc\xca\xa7@\x80'@"
+VERSION = "2.4"
+DTYPE = dtypes[VERSION]["packets"]
 
 
-def parse_msg(msg, io_group=1):
+def parse_msg(msg: np.array, io_group=0) -> np.array:
     assert msg[0] == ord("D")
     pacman_timestamp = msg[1] | (msg[2] << 8) | (msg[3] << 16) | (msg[4] << 24)
     nwords = msg[6] | (msg[7] << 8)
@@ -71,7 +71,7 @@ def parse_msg(msg, io_group=1):
                 shared_fifo = (data[7] >> 4) & 0x03
                 downstream_marker = (data[7] >> 6) & 1
                 parity = (data[7] >> 7) & 1
-                valid_parity = 1  # XXX
+                valid_parity = np.unpackbits(data).sum() % 2
 
                 register_address = (data[1] >> 2) | (data[2] << 6)
                 register_data = (data[2] >> 2) | (data[3] << 6)
@@ -119,9 +119,78 @@ def parse_msg(msg, io_group=1):
     return packets
 
 
-def to_file(filename):
-    with h5py.File(filename, "w") as f:
-        packet_dset = f.create_dataset(
-            "packets", shape=(20,), maxshape=(None,), dtype=dtypes["2.4"]["packets"]
+def init_file(f: h5py.File, chip_list=None):
+    if "_header" not in f.keys():
+        header = f.create_group("_header")
+        header.attrs["version"] = VERSION
+        header.attrs["created"] = time.time()
+    else:
+        header = f["_header"]
+        if header.attrs["version"] != VERSION:
+            raise RuntimeError(
+                "Incompatible versions: existing: %s, "
+                "specified: %s" % (header.attrs["version"], VERSION)
+            )
+    header.attrs["modified"] = time.time()
+
+    # XXX We currently can't handle message packets
+    message_dset_name = "messages"
+    message_dtype = dtypes[VERSION][message_dset_name]
+    if message_dset_name not in f.keys():
+        message_dset = f.create_dataset(
+            message_dset_name, shape=(0,), maxshape=(None,), dtype=message_dtype
         )
-        # packet_dset.resize
+        # message_start_index = 0
+    else:
+        message_dset = f[message_dset_name]
+        # message_start_index = message_dset.shape[0]
+
+    configs = []
+    configs_dset_name = "configs"
+    configs_dtype = dtypes[VERSION][configs_dset_name]
+    if configs_dset_name not in f.keys():
+        configs_dset = f.create_dataset(
+            configs_dset_name, shape=(0,), maxshape=(None,), dtype=configs_dtype
+        )
+        configs_start_index = 0
+    else:
+        configs_dset = f[configs_dset_name]
+        configs_start_index = configs_dset.shape[0]
+    if chip_list:
+        configs_dset.attrs["asic_version"] = str(chip_list[-1].asic_version)
+    for i, chip in enumerate(chip_list):
+        encoded_config = _format_method_lookup[VERSION][configs_dset_name][
+            chip.__class__
+        ](
+            chip,
+            counter=configs_start_index + len(configs),
+            timestamp=header.attrs["modified"],
+        )
+        configs.append(encoded_config)
+    if configs:
+        configs_dset.resize(configs_start_index + len(configs), axis=0)
+        configs_dset[configs_start_index:] = np.concatenate(configs)
+
+
+def to_file_quick(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
+    with h5py.File(filename, mode) as f:
+        init_file(f, chip_list)
+
+        packet_dset_name = "packets"
+        if packet_dset_name not in f.keys():
+            packet_dset = f.create_dataset(
+                packet_dset_name,
+                shape=(0,),
+                maxshape=(None,),
+                dtype=DTYPE,
+            )
+            start_index = 0
+        else:
+            packet_dset = f[packet_dset_name]
+            start_index = packet_dset.shape[0]
+
+        for msg, io_group in zip(msg_list, io_groups):
+            packets = parse_msg(msg, io_group)
+            packet_dset.resize(start_index + len(packets), axis=0)
+            packet_dset[start_index:] = packets
+            start_index += len(packets)
