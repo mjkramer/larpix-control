@@ -920,7 +920,7 @@ def init_file(f: h5py.File, version=None, chip_list=None):
             configs_dset.resize(configs_start_index + len(configs), axis=0)
             configs_dset[configs_start_index:] = np.concatenate(configs)
 
-    return message_dset, configs_dset
+    return version, message_dset, configs_dset
 
 
 def to_file(filename, packet_list=None, chip_list=None, mode='a', version=None, workers=None):
@@ -950,7 +950,7 @@ def to_file(filename, packet_list=None, chip_list=None, mode='a', version=None, 
       workers = max(min(os.cpu_count(), int(len(packet_list)//10000)),1)
 
     with h5py.File(filename, mode) as f:
-        message_dset, _configs_dset = init_file(f, version, chip_list)
+        version, message_dset, _configs_dset = init_file(f, version, chip_list)
 
         # Create datasets
         if version == '0.0':
