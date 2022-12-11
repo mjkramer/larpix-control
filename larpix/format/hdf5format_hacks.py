@@ -3,7 +3,7 @@ import time
 import h5py
 import numpy as np
 
-from .hdf5format import dtypes, _format_method_lookup
+from .hdf5format import dtypes, init_file
 
 VERSION = "2.4"
 DTYPE = dtypes[VERSION]["packets"]
@@ -119,62 +119,9 @@ def parse_msg(msg: np.array, io_group=0) -> np.array:
     return packets
 
 
-def init_file(f: h5py.File, chip_list=None):
-    if "_header" not in f.keys():
-        header = f.create_group("_header")
-        header.attrs["version"] = VERSION
-        header.attrs["created"] = time.time()
-    else:
-        header = f["_header"]
-        if header.attrs["version"] != VERSION:
-            raise RuntimeError(
-                "Incompatible versions: existing: %s, "
-                "specified: %s" % (header.attrs["version"], VERSION)
-            )
-    header.attrs["modified"] = time.time()
-
-    # XXX We currently can't handle message packets
-    message_dset_name = "messages"
-    message_dtype = dtypes[VERSION][message_dset_name]
-    if message_dset_name not in f.keys():
-        message_dset = f.create_dataset(
-            message_dset_name, shape=(0,), maxshape=(None,), dtype=message_dtype
-        )
-        # message_start_index = 0
-    else:
-        message_dset = f[message_dset_name]
-        # message_start_index = message_dset.shape[0]
-
-    configs = []
-    configs_dset_name = "configs"
-    configs_dtype = dtypes[VERSION][configs_dset_name]
-    if configs_dset_name not in f.keys():
-        configs_dset = f.create_dataset(
-            configs_dset_name, shape=(0,), maxshape=(None,), dtype=configs_dtype
-        )
-        configs_start_index = 0
-    else:
-        configs_dset = f[configs_dset_name]
-        configs_start_index = configs_dset.shape[0]
-    if chip_list:
-        configs_dset.attrs["asic_version"] = str(chip_list[-1].asic_version)
-    for i, chip in enumerate(chip_list):
-        encoded_config = _format_method_lookup[VERSION][configs_dset_name][
-            chip.__class__
-        ](
-            chip,
-            counter=configs_start_index + len(configs),
-            timestamp=header.attrs["modified"],
-        )
-        configs.append(encoded_config)
-    if configs:
-        configs_dset.resize(configs_start_index + len(configs), axis=0)
-        configs_dset[configs_start_index:] = np.concatenate(configs)
-
-
 def to_file_quick(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
     with h5py.File(filename, mode) as f:
-        init_file(f, chip_list)
+        init_file(f, VERSION, chip_list)
 
         packet_dset_name = "packets"
         if packet_dset_name not in f.keys():
