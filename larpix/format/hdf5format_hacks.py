@@ -7,6 +7,7 @@ from .hdf5format import dtypes, init_file
 
 VERSION = "2.4"
 DTYPE = dtypes[VERSION]["packets"]
+BUFSIZE = 100000
 
 
 def parse_msg(msg: np.array, io_group=0) -> np.array:
@@ -15,7 +16,8 @@ def parse_msg(msg: np.array, io_group=0) -> np.array:
     nwords = msg[6] | (msg[7] << 8)
 
     npackets = nwords + 1
-    packets = np.zeros((npackets,), dtype=DTYPE)
+    # packets = np.zeros((npackets,), dtype=DTYPE)
+    packets = []
 
     for i in range(npackets):
         io_channel = 0
@@ -56,7 +58,7 @@ def parse_msg(msg: np.array, io_group=0) -> np.array:
                 receipt_timestamp = (
                     header[2] | (header[3] << 8) | (header[4] << 16) | (header[5] << 24)
                 )
-                chip_id = (data[0] >> 2) | (data[1] << 6)
+                chip_id = (data[0] >> 2) | ((data[1] << 6) & 0xFF)
                 channel_id = data[1] >> 2
                 timestamp = (
                     data[2]
@@ -71,10 +73,11 @@ def parse_msg(msg: np.array, io_group=0) -> np.array:
                 shared_fifo = (data[7] >> 4) & 0x03
                 downstream_marker = (data[7] >> 6) & 1
                 parity = (data[7] >> 7) & 1
-                valid_parity = np.unpackbits(data).sum() % 2
+                # valid_parity = np.unpackbits(data).sum() % 2
+                valid_parity = 1 # XXX
 
-                register_address = (data[1] >> 2) | (data[2] << 6)
-                register_data = (data[2] >> 2) | (data[3] << 6)
+                register_address = (data[1] >> 2) | ((data[2] << 6) & 0xFF)
+                register_data = (data[2] >> 2) | ((data[3] << 6) & 0xFF)
 
             elif wordtype == 0x53:  # 'S'
                 packet_type = 6  # sync
@@ -91,29 +94,79 @@ def parse_msg(msg: np.array, io_group=0) -> np.array:
                     header[4] | (header[5] << 8) | (header[6] << 16) | (header[7] << 24)
                 )
 
-        packets[i] = (
-            io_group,
-            io_channel,
-            chip_id,
-            packet_type,
-            downstream_marker,
-            parity,
-            valid_parity,
-            channel_id,
-            timestamp,
-            dataword,
-            trigger_type,
-            local_fifo,
-            shared_fifo,
-            register_address,
-            register_data,
-            direction,
-            local_fifo_events,
-            shared_fifo_events,
-            counter,
-            fifo_diagnostics_enabled,
-            first_packet,
-            receipt_timestamp,
+        # packets[i] = (
+        #     io_group,
+        #     io_channel,
+        #     chip_id,
+        #     packet_type,
+        #     downstream_marker,
+        #     parity,
+        #     valid_parity,
+        #     channel_id,
+        #     timestamp,
+        #     dataword,
+        #     trigger_type,
+        #     local_fifo,
+        #     shared_fifo,
+        #     register_address,
+        #     register_data,
+        #     direction,
+        #     local_fifo_events,
+        #     shared_fifo_events,
+        #     counter,
+        #     fifo_diagnostics_enabled,
+        #     first_packet,
+        #     receipt_timestamp,
+        # )
+
+        # packets[i][0] = io_group
+        # packets[i][1] = io_channel
+        # packets[i][2] = chip_id
+        # packets[i][3] = packet_type
+        # packets[i][4] = downstream_marker
+        # packets[i][5] = parity
+        # packets[i][6] = valid_parity
+        # packets[i][7] = channel_id
+        # packets[i][8] = timestamp
+        # packets[i][9] = dataword
+        # packets[i][10] = trigger_type
+        # packets[i][11] = local_fifo
+        # packets[i][12] = shared_fifo
+        # packets[i][13] = register_address
+        # packets[i][14] = register_data
+        # packets[i][15] = direction
+        # packets[i][16] = local_fifo_events
+        # packets[i][17] = shared_fifo_events
+        # packets[i][18] = counter
+        # packets[i][19] = fifo_diagnostics_enabled
+        # packets[i][20] = first_packet
+        # packets[i][21] = receipt_timestamp
+
+        packets.append(
+            (
+                np.uint8(io_group),
+                np.uint8(io_channel),
+                np.uint8(chip_id),
+                np.uint8(packet_type),
+                np.uint8(downstream_marker),
+                np.uint8(parity),
+                np.uint8(valid_parity),
+                np.uint8(channel_id),
+                np.uint64(timestamp),
+                np.uint8(dataword),
+                np.uint8(trigger_type),
+                np.uint8(local_fifo),
+                np.uint8(shared_fifo),
+                np.uint8(register_address),
+                np.uint8(register_data),
+                np.uint8(direction),
+                np.uint8(local_fifo_events),
+                np.uint16(shared_fifo_events),
+                np.uint32(counter),
+                np.uint8(fifo_diagnostics_enabled),
+                np.uint8(first_packet),
+                np.uint32(receipt_timestamp),
+            )
         )
 
     return packets
@@ -136,8 +189,23 @@ def to_file_quick(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
             packet_dset = f[packet_dset_name]
             start_index = packet_dset.shape[0]
 
-        for msg, io_group in zip(msg_list, io_groups):
-            packets = parse_msg(msg, io_group)
-            packet_dset.resize(start_index + len(packets), axis=0)
+        packets = []
+
+        def write():
+            nonlocal packets
+            nonlocal start_index
+            packet_dset.resize(packet_dset.shape[0] + len(packets), axis=0)
             packet_dset[start_index:] = packets
             start_index += len(packets)
+            packets = []
+
+        for msg, io_group in zip(msg_list, io_groups):
+            # packets = parse_msg(msg, io_group)
+            # packet_dset.resize(start_index + len(packets), axis=0)
+            # packet_dset[start_index:] = packets
+            # start_index += len(packets)
+            packets.extend(parse_msg(msg, io_group))
+            if len(packets) > BUFSIZE:
+                write()
+
+        write()

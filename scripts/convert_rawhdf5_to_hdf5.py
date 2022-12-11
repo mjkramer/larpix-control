@@ -10,9 +10,11 @@ from larpix.format.pacman_msg_format import parse
 from larpix.format.hdf5format import to_file
 from larpix.format.hdf5format_hacks import to_file_quick
 
-def main(input_filename, output_filename, block_size, quick):
+def main(input_filename, output_filename, block_size, quick, max_blocks):
     total_messages = len_rawfile(input_filename)
     total_blocks = total_messages // block_size + 1
+    if max_blocks != -1:
+        total_blocks = min(max_blocks, total_blocks)
     last = time.time()
     for i_block in range(total_blocks):
         start = i_block * block_size
@@ -40,5 +42,6 @@ if __name__ == '__main__':
         to be formatted with larpix.format.hdf5format''')
     parser.add_argument('--block_size', default=10240, type=int, help='''Max number of messages to store in working memory (default=%(default)s)''')
     parser.add_argument('--quick', action='store_true')
+    parser.add_argument('--max_blocks', type=int, default=-1)
     args = parser.parse_args()
     c = main(**vars(args))
