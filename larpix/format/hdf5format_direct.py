@@ -14,9 +14,8 @@ BUFSIZE = 100000
 @numba.njit
 def calc_parity(data: np.array):
     "data is an array of 8 uint8s"
-    # ugh the following doesn't work
-    # x = data.view(np.uint64)[0]
-    # HACK
+    # ugh the following doesn't work: x = data.view(np.uint64)[0]
+    # so instead, HACK:
     x = np.uint64((data[0] << 56) | (data[1] << 48) | (data[2] << 42) | (data[3] << 32) |
                   (data[4] << 24) | (data[5] << 16) | (data[6] << 8)  | (data[7]))
     x ^= x >> 32
@@ -31,14 +30,11 @@ def calc_parity(data: np.array):
 @numba.njit
 def parse_msg(msg: np.array, packets: np.array, io_group=0) -> np.array:
     "packets is output parameter. array types are uint8"
-    assert msg[0] == ord("D")
+    # assert msg[0] == ord("D")
     pacman_timestamp = msg[1] | (msg[2] << 8) | (msg[3] << 16) | (msg[4] << 24)
-    # skip msg[5]
     nwords = msg[6] | (msg[7] << 8)
 
     npackets = nwords + 1
-    # packets = np.zeros((npackets,), dtype=DTYPE)
-    # packets = []
 
     for i in range(npackets):
         io_channel = 0
@@ -115,31 +111,11 @@ def parse_msg(msg: np.array, packets: np.array, io_group=0) -> np.array:
                     header[4] | (header[5] << 8) | (header[6] << 16) | (header[7] << 24)
                 )
 
-        # packets[i] = (
-        #     io_group,
-        #     io_channel,
-        #     chip_id,
-        #     packet_type,
-        #     downstream_marker,
-        #     parity,
-        #     valid_parity,
-        #     channel_id,
-        #     timestamp,
-        #     dataword,
-        #     trigger_type,
-        #     local_fifo,
-        #     shared_fifo,
-        #     register_address,
-        #     register_data,
-        #     direction,
-        #     local_fifo_events,
-        #     shared_fifo_events,
-        #     counter,
-        #     fifo_diagnostics_enabled,
-        #     first_packet,
-        #     receipt_timestamp,
-        # )
+        # NOTE: The following methods don't seem to work in Numba:
+        # packets[i] = ( io_group, io_channel, ... )
+        # packets[i] = ( np.uint8(io_group), np.uint8(io_channel), ... )
 
+        # ...so instead we painfully write the indices
         packets[i][0] = io_group
         packets[i][1] = io_channel
         packets[i][2] = chip_id
@@ -163,38 +139,10 @@ def parse_msg(msg: np.array, packets: np.array, io_group=0) -> np.array:
         packets[i][20] = first_packet
         packets[i][21] = receipt_timestamp
 
-        # packets.append(
-        #     (
-        #         np.uint8(io_group),
-        #         np.uint8(io_channel),
-        #         np.uint8(chip_id),
-        #         np.uint8(packet_type),
-        #         np.uint8(downstream_marker),
-        #         np.uint8(parity),
-        #         np.uint8(valid_parity),
-        #         np.uint8(channel_id),
-        #         np.uint64(timestamp),
-        #         np.uint8(dataword),
-        #         np.uint8(trigger_type),
-        #         np.uint8(local_fifo),
-        #         np.uint8(shared_fifo),
-        #         np.uint8(register_address),
-        #         np.uint8(register_data),
-        #         np.uint8(direction),
-        #         np.uint8(local_fifo_events),
-        #         np.uint16(shared_fifo_events),
-        #         np.uint32(counter),
-        #         np.uint8(fifo_diagnostics_enabled),
-        #         np.uint8(first_packet),
-        #         np.uint32(receipt_timestamp),
-        #     )
-        # )
-
-    # return packets
     return npackets
 
 
-def to_file_quick(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
+def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
     with h5py.File(filename, mode) as f:
         init_file(f, VERSION, chip_list)
 
@@ -215,7 +163,6 @@ def to_file_quick(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
         npackets = 0
 
         def write():
-            # nonlocal packets
             nonlocal npackets
             nonlocal start_index
             packet_dset.resize(packet_dset.shape[0] + npackets, axis=0)
@@ -224,20 +171,9 @@ def to_file_quick(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
             npackets = 0
 
         for msg, io_group in zip(msg_list, io_groups):
-            # packets = parse_msg(msg, io_group)
-            # packet_dset.resize(start_index + len(packets), axis=0)
-            # packet_dset[start_index:] = packets
-            # start_index += len(packets)
-
-            # packets.extend(parse_msg(msg, io_group))
-            # if len(packets) > BUFSIZE:
-            #     write()
-
             num_new_pkts = parse_msg(msg, packets[npackets:], io_group)
-            # packets[npackets:npackets+len(newpackets)] = newpackets
             npackets += num_new_pkts
             if npackets > BUFSIZE:
                 write()
-
 
         write()
