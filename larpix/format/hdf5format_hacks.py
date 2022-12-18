@@ -12,8 +12,25 @@ BUFSIZE = 100000
 
 
 @numba.njit
+def calc_parity(data: np.array):
+    "data is an array of 8 uint8s"
+    # ugh the following doesn't work
+    # x = data.view(np.uint64)[0]
+    # HACK
+    x = np.uint64((data[0] << 56) | (data[1] << 48) | (data[2] << 42) | (data[3] << 32) |
+                  (data[4] << 24) | (data[5] << 16) | (data[6] << 8)  | (data[7]))
+    x ^= x >> 32
+    x ^= x >> 16
+    x ^= x >> 8
+    x ^= x >> 4
+    x ^= x >> 2
+    x ^= x >> 1
+    return x & 1
+
+
+@numba.njit
 def parse_msg(msg: np.array, packets: np.array, io_group=0) -> np.array:
-    "packets is output parameter"
+    "packets is output parameter. array types are uint8"
     assert msg[0] == ord("D")
     pacman_timestamp = msg[1] | (msg[2] << 8) | (msg[3] << 16) | (msg[4] << 24)
     # skip msg[5]
@@ -78,7 +95,7 @@ def parse_msg(msg: np.array, packets: np.array, io_group=0) -> np.array:
                 downstream_marker = (data[7] >> 6) & 1
                 parity = (data[7] >> 7) & 1
                 # valid_parity = np.unpackbits(data).sum() % 2
-                valid_parity = 1 # XXX
+                valid_parity = calc_parity(data)
 
                 register_address = (data[1] >> 2) | ((data[2] << 6) & 0xFF)
                 register_data = (data[2] >> 2) | ((data[3] << 6) & 0xFF)
