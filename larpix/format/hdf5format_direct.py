@@ -8,10 +8,10 @@ from .hdf5format import dtypes, init_file
 
 VERSION = "2.4"
 DTYPE = dtypes[VERSION]["packets"]
-BUFSIZE = 100000
+BUFSIZE = 200000
 
 
-@numba.njit
+@numba.njit(nogil=True)
 def calc_parity(data: np.array):
     "data is an array of 8 uint8s"
     # ugh the following doesn't work: x = data.view(np.uint64)[0]
@@ -27,9 +27,9 @@ def calc_parity(data: np.array):
     return x & 1
 
 
-@numba.njit
-def parse_msg(msg: np.array, packets: np.array, io_group=0) -> np.array:
-    "packets is output parameter. array types are uint8"
+@numba.njit(nogil=True)
+def parse_msg(msg: np.array, io_group: int, out_packets: np.array, ) -> np.array:
+    "array types are uint8"
     # assert msg[0] == ord("D")
     pacman_timestamp = msg[1] | (msg[2] << 8) | (msg[3] << 16) | (msg[4] << 24)
     nwords = msg[6] | (msg[7] << 8)
@@ -112,34 +112,49 @@ def parse_msg(msg: np.array, packets: np.array, io_group=0) -> np.array:
                 )
 
         # NOTE: The following methods don't seem to work in Numba:
-        # packets[i] = ( io_group, io_channel, ... )
-        # packets[i] = ( np.uint8(io_group), np.uint8(io_channel), ... )
+        # out_packets[i] = ( io_group, io_channel, ... )
+        # out_packets[i] = ( np.uint8(io_group), np.uint8(io_channel), ... )
 
         # ...so instead we painfully write the indices
-        packets[i][0] = io_group
-        packets[i][1] = io_channel
-        packets[i][2] = chip_id
-        packets[i][3] = packet_type
-        packets[i][4] = downstream_marker
-        packets[i][5] = parity
-        packets[i][6] = valid_parity
-        packets[i][7] = channel_id
-        packets[i][8] = timestamp
-        packets[i][9] = dataword
-        packets[i][10] = trigger_type
-        packets[i][11] = local_fifo
-        packets[i][12] = shared_fifo
-        packets[i][13] = register_address
-        packets[i][14] = register_data
-        packets[i][15] = direction
-        packets[i][16] = local_fifo_events
-        packets[i][17] = shared_fifo_events
-        packets[i][18] = counter
-        packets[i][19] = fifo_diagnostics_enabled
-        packets[i][20] = first_packet
-        packets[i][21] = receipt_timestamp
+        out_packets[i][0] = io_group
+        out_packets[i][1] = io_channel
+        out_packets[i][2] = chip_id
+        out_packets[i][3] = packet_type
+        out_packets[i][4] = downstream_marker
+        out_packets[i][5] = parity
+        out_packets[i][6] = valid_parity
+        out_packets[i][7] = channel_id
+        out_packets[i][8] = timestamp
+        out_packets[i][9] = dataword
+        out_packets[i][10] = trigger_type
+        out_packets[i][11] = local_fifo
+        out_packets[i][12] = shared_fifo
+        out_packets[i][13] = register_address
+        out_packets[i][14] = register_data
+        out_packets[i][15] = direction
+        out_packets[i][16] = local_fifo_events
+        out_packets[i][17] = shared_fifo_events
+        out_packets[i][18] = counter
+        out_packets[i][19] = fifo_diagnostics_enabled
+        out_packets[i][20] = first_packet
+        out_packets[i][21] = receipt_timestamp
 
     return npackets
+
+
+# @numba.njit(parallel=True, nogil=True)
+# @numba.njit(nogil=True)
+def convert_block(msg_list, io_groups, out_packets, out_npackets,
+                  nthreads=numba.get_num_threads()):
+    # for i in numba.prange(nthreads):
+    for i in range(nthreads):
+        step = len(msg_list) // nthreads
+        firstmsg = i * step
+        lastmsg = None if i == nthreads - 1 else firstmsg + step
+        for j, (msg, iog) in enumerate(zip(msg_list[firstmsg:lastmsg],
+                                           io_groups[firstmsg:lastmsg])):
+            pktslice = out_packets[(i*BUFSIZE + out_npackets[i]):]
+            out_npackets[i] += parse_msg(msg, iog, pktslice)
 
 
 def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
@@ -159,21 +174,14 @@ def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
             packet_dset = f[packet_dset_name]
             start_index = packet_dset.shape[0]
 
-        packets = np.zeros(shape=(2*BUFSIZE,), dtype=DTYPE)
-        npackets = 0
+        nthreads = numba.get_num_threads()
+        packets = np.zeros(shape=(10*nthreads*BUFSIZE,), dtype=DTYPE)
+        npackets = np.zeros(shape=(nthreads,), dtype=int)
 
-        def write():
-            nonlocal npackets
-            nonlocal start_index
-            packet_dset.resize(packet_dset.shape[0] + npackets, axis=0)
-            packet_dset[start_index:] = packets[:npackets]
-            start_index += len(packets)
-            npackets = 0
+        convert_block(msg_list, io_groups, packets, npackets)
 
-        for msg, io_group in zip(msg_list, io_groups):
-            num_new_pkts = parse_msg(msg, packets[npackets:], io_group)
-            npackets += num_new_pkts
-            if npackets > BUFSIZE:
-                write()
-
-        write()
+        tot_packets = sum(npackets)
+        packet_dset.resize(packet_dset.shape[0] + tot_packets, axis=0)
+        for i in range(nthreads):
+            packet_dset[start_index:(start_index + npackets[i])] = packets[(i*BUFSIZE):(i*BUFSIZE + npackets[i])]
+            start_index += npackets[i]
