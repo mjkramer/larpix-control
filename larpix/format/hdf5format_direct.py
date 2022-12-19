@@ -142,12 +142,14 @@ def parse_msg(msg: np.array, io_group: int, out_packets: np.array, ) -> np.array
     return npackets
 
 
-# @numba.njit(parallel=True, nogil=True)
+@numba.njit(parallel=True, nogil=True)
 # @numba.njit(nogil=True)
 def convert_block(msg_list, io_groups, out_packets, out_npackets,
                   nthreads=numba.get_num_threads()):
-    # for i in numba.prange(nthreads):
-    for i in range(nthreads):
+    nthreads = 1 if nthreads is None else nthreads
+    nthreads = 1 if nthreads == 0 else nthreads
+    # for i in range(nthreads):
+    for i in numba.prange(nthreads):
         step = len(msg_list) // nthreads
         firstmsg = i * step
         lastmsg = None if i == nthreads - 1 else firstmsg + step
@@ -175,10 +177,12 @@ def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
             start_index = packet_dset.shape[0]
 
         nthreads = numba.get_num_threads()
+        if not nthreads:
+            nthreads = 1
         packets = np.zeros(shape=(10*nthreads*BUFSIZE,), dtype=DTYPE)
         npackets = np.zeros(shape=(nthreads,), dtype=int)
 
-        convert_block(msg_list, io_groups, packets, npackets)
+        convert_block(msg_list, io_groups, packets, npackets, nthreads)
 
         tot_packets = sum(npackets)
         packet_dset.resize(packet_dset.shape[0] + tot_packets, axis=0)
