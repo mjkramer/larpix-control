@@ -10,6 +10,8 @@ from larpix.format.pacman_msg_format import parse
 from larpix.format.hdf5format import to_file
 from larpix.format.hdf5format_direct import to_file_direct
 
+# XXX current problem seems to be that from_rawfile is giving us lists of msgs et
+
 def main(input_filename, output_filename, block_size, direct, max_blocks):
     total_messages = len_rawfile(input_filename)
     total_blocks = total_messages // block_size + 1

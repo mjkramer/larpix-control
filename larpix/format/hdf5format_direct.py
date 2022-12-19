@@ -160,14 +160,22 @@ def convert_block_0(msg_list, io_groups, out_packets, out_npackets,
 
 
 # @numba.njit(nogil=True)
-def convert_block(msg_list: np.array, io_groups: np.array, out_packets: np.array):
+def convert_block(msg_list: np.array, io_groups: np.array, out_packets: np.array, L):
     npackets = 0
-    for msg, iog in zip(msg_list, io_groups):
+    # for i in range(len(msg_list)):
+    # for msg, iog in zip(msg_list, io_groups):
+    i = 0
+    # L = len(msg_list)
+    while i < L:
+        msg = msg_list[i]
+        iog = io_groups[i]
+        # print(type(msg), type(io_groups[i]))
         npackets += parse_msg(msg, iog, out_packets[npackets:])
+        i += 1
     return npackets
 
 
-def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
+def to_file_direct(filename, msg_list, io_groups, chip_list=[], mode="a"):
     with h5py.File(filename, mode) as f:
         init_file(f, VERSION, chip_list)
 
@@ -190,14 +198,20 @@ def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
         packets = np.zeros(shape=(10*nthreads*BUFSIZE,), dtype=DTYPE)
         npackets = np.zeros(shape=(nthreads,), dtype=int)
 
+        # print(type(msg_list))
+        # print(type(io_groups))
+
         # convert_block(msg_list, io_groups, packets, npackets, nthreads)
 
         for i in range(nthreads):
             step = len(msg_list) // nthreads
             firstmsg = i * step
-            lastmsg = None if i == nthreads - 1 else firstmsg + step
-            npackets[i] = convert_block(msg_list[firstmsg:lastmsg], io_groups[firstmsg:lastmsg],
-                                        packets[i*BUFSIZE:])
+            lastmsg = len(msg_list) if i == nthreads - 1 else firstmsg + step
+            # npackets[i] = convert_block(np.array(msg_list[firstmsg:lastmsg]),
+            #                             np.array(io_groups[firstmsg:lastmsg]),
+            npackets[i] = convert_block(np.array(msg_list[firstmsg:lastmsg], dtype=h5py.vlen_dtype(np.dtype('u1'))),
+                                        np.array(io_groups[firstmsg:lastmsg], dtype=int),
+                                        packets[i*BUFSIZE:], lastmsg - firstmsg)
 
         tot_packets = sum(npackets)
         tmp_dset = np.zeros(shape=(tot_packets,), dtype=DTYPE)
