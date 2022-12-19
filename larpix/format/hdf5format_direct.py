@@ -144,8 +144,8 @@ def parse_msg(msg: np.array, io_group: int, out_packets: np.array, ) -> np.array
 
 @numba.njit(parallel=True, nogil=True)
 # @numba.njit(nogil=True)
-def convert_block(msg_list, io_groups, out_packets, out_npackets,
-                  nthreads=numba.get_num_threads()):
+def convert_block_0(msg_list, io_groups, out_packets, out_npackets,
+                    nthreads=numba.get_num_threads()):
     nthreads = 1 if nthreads is None else nthreads
     nthreads = 1 if nthreads == 0 else nthreads
     # for i in range(nthreads):
@@ -157,6 +157,14 @@ def convert_block(msg_list, io_groups, out_packets, out_npackets,
                                            io_groups[firstmsg:lastmsg])):
             pktslice = out_packets[(i*BUFSIZE + out_npackets[i]):]
             out_npackets[i] += parse_msg(msg, iog, pktslice)
+
+
+# @numba.njit(nogil=True)
+def convert_block(msg_list: np.array, io_groups: np.array, out_packets: np.array):
+    npackets = 0
+    for msg, iog in zip(msg_list, io_groups):
+        npackets += parse_msg(msg, iog, out_packets[npackets:])
+    return npackets
 
 
 def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
@@ -182,7 +190,14 @@ def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
         packets = np.zeros(shape=(10*nthreads*BUFSIZE,), dtype=DTYPE)
         npackets = np.zeros(shape=(nthreads,), dtype=int)
 
-        convert_block(msg_list, io_groups, packets, npackets, nthreads)
+        # convert_block(msg_list, io_groups, packets, npackets, nthreads)
+
+        for i in range(nthreads):
+            step = len(msg_list) // nthreads
+            firstmsg = i * step
+            lastmsg = None if i == nthreads - 1 else firstmsg + step
+            npackets[i] = convert_block(msg_list[firstmsg:lastmsg], io_groups[firstmsg:lastmsg],
+                                        packets[i*BUFSIZE:])
 
         tot_packets = sum(npackets)
         packet_dset.resize(packet_dset.shape[0] + tot_packets, axis=0)
