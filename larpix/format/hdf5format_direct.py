@@ -159,7 +159,7 @@ def convert_block_0(msg_list, io_groups, out_packets, out_npackets,
             out_npackets[i] += parse_msg(msg, iog, pktslice)
 
 
-# @numba.njit(nogil=True)
+@numba.njit(nogil=True)
 def convert_block(msg_list: np.array, io_groups: np.array, out_packets: np.array, L):
     npackets = 0
     # for i in range(len(msg_list)):
