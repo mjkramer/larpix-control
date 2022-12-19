@@ -200,7 +200,14 @@ def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
                                         packets[i*BUFSIZE:])
 
         tot_packets = sum(npackets)
-        packet_dset.resize(packet_dset.shape[0] + tot_packets, axis=0)
+        tmp_dset = np.zeros(shape=(tot_packets,), dtype=DTYPE)
+        tmp_index = 0
         for i in range(nthreads):
-            packet_dset[start_index:(start_index + npackets[i])] = packets[(i*BUFSIZE):(i*BUFSIZE + npackets[i])]
-            start_index += npackets[i]
+            tmp_dset[tmp_index:(tmp_index + npackets[i])] = packets[(i*BUFSIZE):(i*BUFSIZE + npackets[i])]
+            tmp_index += npackets[i]
+
+        # for i in range(nthreads):
+        #     packet_dset[start_index:(start_index + npackets[i])] = packets[(i*BUFSIZE):(i*BUFSIZE + npackets[i])]
+        #     start_index += npackets[i]
+        packet_dset.resize(packet_dset.shape[0] + tot_packets, axis=0)
+        packet_dset[start_index:] = packets[:tot_packets]
