@@ -1,3 +1,4 @@
+import threading
 import time
 
 import h5py
@@ -159,7 +160,7 @@ def convert_block_0(msg_list, io_groups, out_packets, out_npackets,
             out_npackets[i] += parse_msg(msg, iog, pktslice)
 
 
-@numba.njit(nogil=True)
+# @numba.njit(nogil=True)
 def convert_block(msg_list: np.array, io_groups: np.array, out_packets: np.array, L):
     npackets = 0
     # for i in range(len(msg_list)):
@@ -203,15 +204,31 @@ def to_file_direct(filename, msg_list, io_groups, chip_list=[], mode="a"):
 
         # convert_block(msg_list, io_groups, packets, npackets, nthreads)
 
+        threads = []
+        lens = [len(m) for m in msg_list]
+
+
         for i in range(nthreads):
             step = len(msg_list) // nthreads
             firstmsg = i * step
             lastmsg = len(msg_list) if i == nthreads - 1 else firstmsg + step
             # npackets[i] = convert_block(np.array(msg_list[firstmsg:lastmsg]),
             #                             np.array(io_groups[firstmsg:lastmsg]),
-            npackets[i] = convert_block(np.array(msg_list[firstmsg:lastmsg], dtype=h5py.vlen_dtype(np.dtype('u1'))),
-                                        np.array(io_groups[firstmsg:lastmsg], dtype=int),
-                                        packets[i*BUFSIZE:], lastmsg - firstmsg)
+            # npackets[i] = convert_block(np.array(msg_list[firstmsg:lastmsg], dtype=h5py.vlen_dtype(np.dtype('u1'))),
+            #                             np.array(io_groups[firstmsg:lastmsg], dtype=int),
+            #                             packets[i*BUFSIZE:], lastmsg - firstmsg)
+            thread = threading.Thread(target=convert_block,
+                                      # args=(np.array(msg_list[firstmsg:lastmsg], dtype=h5py.vlen_dtype(np.dtype('u1'))),
+                                      #       np.array(io_groups[firstmsg:lastmsg], dtype=int),
+                                      args=(msg_list[firstmsg:lastmsg],
+                                            io_groups[firstmsg:lastmsg],
+                                            packets[i*BUFSIZE:],
+                                            lastmsg - firstmsg))
+            threads.append(thread)
+            thread.start()
+
+        for t in threads:
+            t.join()
 
         tot_packets = sum(npackets)
         tmp_dset = np.zeros(shape=(tot_packets,), dtype=DTYPE)
@@ -224,4 +241,4 @@ def to_file_direct(filename, msg_list, io_groups, chip_list=[], mode="a"):
         #     packet_dset[start_index:(start_index + npackets[i])] = packets[(i*BUFSIZE):(i*BUFSIZE + npackets[i])]
         #     start_index += npackets[i]
         packet_dset.resize(packet_dset.shape[0] + tot_packets, axis=0)
-        packet_dset[start_index:] = packets[:tot_packets]
+        packet_dset[start_index:] = tmp_dset[:tot_packets]
