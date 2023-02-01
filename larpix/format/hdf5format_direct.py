@@ -71,7 +71,7 @@ def parse_msg(msg: np.array, packets: np.array, io_group=0) -> int:
             wordtype = header[0]
 
             if wordtype == 0x44:  # 'D'
-                packet_type = 0  # data
+                packet_type = data[0] & 3
                 io_channel = header[1]
                 receipt_timestamp = (
                     header[2] | (header[3] << 8) | (header[4] << 16) | (header[5] << 24)
