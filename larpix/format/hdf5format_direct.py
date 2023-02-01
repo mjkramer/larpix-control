@@ -1,3 +1,4 @@
+# XXX see packet 194106 in cooldown_blah.h5
 import time
 
 import h5py
@@ -16,7 +17,7 @@ def calc_parity(data: np.array):
     "data is an array of 8 uint8s"
     # ugh the following doesn't work: x = data.view(np.uint64)[0]
     # so instead, HACK:
-    x = np.uint64((data[0] << 56) | (data[1] << 48) | (data[2] << 42) | (data[3] << 32) |
+    x = np.uint64((data[0] << 56) | (data[1] << 48) | (data[2] << 40) | (data[3] << 32) |
                   (data[4] << 24) | (data[5] << 16) | (data[6] << 8)  | (data[7]))
     x ^= x >> 32
     x ^= x >> 16
@@ -28,7 +29,7 @@ def calc_parity(data: np.array):
 
 
 @numba.njit
-def parse_msg(msg: np.array, packets: np.array, io_group=0) -> np.array:
+def parse_msg(msg: np.array, packets: np.array, io_group=0) -> int:
     "packets is output parameter. array types are uint8"
     # assert msg[0] == ord("D")
     pacman_timestamp = msg[1] | (msg[2] << 8) | (msg[3] << 16) | (msg[4] << 24)
@@ -167,7 +168,7 @@ def to_file_direct(filename, msg_list=[], io_groups=[], chip_list=[], mode="a"):
             nonlocal start_index
             packet_dset.resize(packet_dset.shape[0] + npackets, axis=0)
             packet_dset[start_index:] = packets[:npackets]
-            start_index += len(packets)
+            start_index += npackets
             npackets = 0
 
         for msg, io_group in zip(msg_list, io_groups):
