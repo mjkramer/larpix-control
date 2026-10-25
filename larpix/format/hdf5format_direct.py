@@ -12,19 +12,24 @@ DEFAULT_DIRECT_VERSION = "2.4"
 BUFSIZE = 100000
 
 
-def _require_direct_versions(asic_versions: dict[int, int], format_version: str):
+def _require_direct_versions(asic_versions: dict[int, int],
+                             format_version: str,
+                             io_groups: npt.NDArray[np.uint8],
+):
     """Validate that the ASIC versions and format version are compatible.
 
     Args:
         asic_versions: Mapping of io_group to ASIC version. Only versions 2
-            and 3 are supported.
+            and 3 are supported. May be a defaultdict.
         format_version: The HDF5 packet format version string (e.g. "2.4"
             or "3.0").
+        io_groups: Array of IO groups for each PACMAN message.
 
     Raises:
         ValueError: If any ASIC version is not 2 or 3, if ASIC v3 is used
             without format version "3.0", or if ASIC v2 is used with a
-            format version other than "2.4" or "3.0".
+            format version other than "2.4" or "3.0", or if asic_versions
+            is not a defaultdict and any IO group has an unspecified version.
     """
     asic_version_list = (
         [asic_versions[0]]
@@ -40,6 +45,11 @@ def _require_direct_versions(asic_versions: dict[int, int], format_version: str)
 
     if 3 not in asic_version_list and format_version not in ["2.4", "3.0"]:
         raise ValueError("ASIC v2 requires --format-version 2.4 or 3.0")
+
+    if not isinstance(asic_versions, defaultdict):
+        for iog in np.unique(io_groups):
+            if iog not in asic_versions:
+                raise ValueError(f"No ASIC version specified for IO group {iog}")
 
 
 @numba.njit
@@ -526,7 +536,7 @@ def to_file_direct(
             (see :func:`_require_direct_versions`), or if a message's
             io_group has no associated ASIC version.
     """
-    _require_direct_versions(asic_versions, format_version)
+    _require_direct_versions(asic_versions, format_version, io_groups)
 
     dtype = dtypes[format_version]["packets"]
 
@@ -561,20 +571,7 @@ def to_file_direct(
         parse_v2 = parse_msg_v2_format_v3 if format_version == "3.0" else parse_msg_v2
 
         for msg, io_group in zip(msg_list, io_groups):
-            if (not isinstance(asic_versions, defaultdict)) and (
-                io_group not in asic_versions
-            ):
-                raise ValueError(f"No ASIC version specified for IO group {io_group}")
-            match asic_versions[io_group]:
-                case 2:
-                    parse = parse_v2
-                case 3:
-                    parse = parse_msg_v3
-                case v:
-                    raise ValueError(
-                        f"Unsupported ASIC version {v} for IO group {io_group}"
-                    )
-
+            parse = parse_msg_v3 if asic_versions[io_group] == 3 else parse_v2
             num_new_pkts = parse(msg, packets[npackets:], io_group)
             npackets += num_new_pkts
             if npackets > BUFSIZE:
