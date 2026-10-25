@@ -42,20 +42,6 @@ def _require_direct_versions(asic_versions: dict[int, int], format_version: str)
         raise ValueError("ASIC v2 requires --format-version 2.4 or 3.0")
 
 
-def _asic_versions_arr(
-    io_groups: npt.NDArray[np.uint8], asic_versions: dict[int, int]
-) -> npt.NDArray[np.uint8]:
-    uniq_iogs = np.unique(io_groups)
-    asic_versions_arr = np.zeros(np.max(uniq_iogs) + 1, dtype=np.uint8)
-    if isinstance(asic_versions, defaultdict):
-        asic_versions_arr[uniq_iogs] = asic_versions[0]
-    else:
-        asic_versions_arr[uniq_iogs] = [
-            asic_versions[k] for k in sorted(list(asic_versions))
-        ]
-    return asic_versions_arr
-
-
 @numba.njit
 def calc_parity(data: npt.NDArray[np.uint8]) -> np.uint8:
     """Compute the XOR parity bit of an 8-byte array.
@@ -572,18 +558,21 @@ def to_file_direct(
             start_index += npackets
             npackets = 0
 
-        # asic_versions_arr = _asic_versions_arr(io_groups, asic_versions)
         parse_v2 = parse_msg_v2_format_v3 if format_version == "3.0" else parse_msg_v2
 
         for msg, io_group in zip(msg_list, io_groups):
+            if (not isinstance(asic_versions, defaultdict)) and (
+                io_group not in asic_versions
+            ):
+                raise ValueError(f"No ASIC version specified for IO group {io_group}")
             match asic_versions[io_group]:
                 case 2:
                     parse = parse_v2
                 case 3:
                     parse = parse_msg_v3
-                case _:
+                case v:
                     raise ValueError(
-                        f"No ASIC version specified for IO group {io_group}"
+                        f"Unsupported ASIC version {v} for IO group {io_group}"
                     )
 
             num_new_pkts = parse(msg, packets[npackets:], io_group)
